@@ -1,0 +1,86 @@
+/*
+===============================================================================
+DDL Script: Create Bronze Tables
+===============================================================================
+Script Purpose:
+    This script creates tables in the 'bronze' schema, dropping existing tables
+    if they already exist.
+    Run this script to re-define the DDL structure of 'bronze' Tables
+===============================================================================
+/*
+ USE Datawarehouse;
+
+IF OBJECT_ID('bronze.crm_customers', 'U') IS NOT NULL
+    DROP TABLE bronze.crm_customers;
+GO
+
+CREATE TABLE bronze.crm_customers (
+    customer_id INT,
+    first_name NVARCHAR(50),
+    last_name NVARCHAR(50),
+    email NVARCHAR(50),
+    signup_date DATE
+);
+
+USE Datawarehouse;
+IF OBJECT_ID('bronze.crm_interactions', 'U') IS NOT NULL
+    DROP TABLE bronze.crm_interactions;
+GO
+
+CREATE TABLE bronze.crm_interactions (
+    interaction_id INT,
+    customer_id INT,
+    channel NVARCHAR(50),
+    [status] NVARCHAR(50),
+);
+
+
+USE Datawarehouse;
+IF OBJECT_ID('bronze.crm_support_tickets', 'U') IS NOT NULL
+    DROP TABLE bronze.crm_support_tickets;
+GO
+
+CREATE TABLE bronze.crm_support_tickets( 
+    tickets_id INT,
+    customer_id INT,
+    issue_category NVARCHAR(50),
+    [priority] NVARCHAR(50),
+);
+
+USE Datawarehouse;
+IF OBJECT_ID('bronze.erp_order_items', 'U') IS NOT NULL
+    DROP TABLE bronze.erp_order_items;
+GO
+
+CREATE TABLE bronze.erp_order_items( 
+    order_item_id INT,
+    order_id INT,
+    product_id INT,
+    quantity INT,
+);
+
+
+USE Datawarehouse;
+IF OBJECT_ID('bronze.erp_orders', 'U') IS NOT NULL
+    DROP TABLE bronze.erp_orders;
+GO
+
+CREATE TABLE bronze.erp_orders( 
+    order_id INT,
+    customer_id INT,
+    order_date DATETIME2,
+    order_status NVARCHAR (50),
+);
+
+
+USE Datawarehouse;
+IF OBJECT_ID('bronze.erp_products', 'U') IS NOT NULL
+    DROP TABLE bronze.erp_products;
+GO
+
+CREATE TABLE bronze.erp_products( 
+    product_id INT,
+    product_name NVARCHAR (50),
+    category NVARCHAR (50),
+    price DECIMAL(10,2),
+);
