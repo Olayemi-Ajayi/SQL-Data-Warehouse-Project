@@ -37,3 +37,24 @@ An end-to-end **Medallion Architecture** (`bronze`, `silver`, `gold`) data wareh
 |     Facts:      gold.fact_sales, gold.fact_interactions,             |
 |                  gold.fact_support_tickets                            |
 +-----------------------------------------------------------------------+
+
+## Repository Structure
+
+SQL-Data-Warehouse-Project/
+├── README.md
+├── Scripts/
+│   ├── Bronze/
+│   │   ├── ddl_bronze.sql
+│   │   └── proc_load_bronze.sql
+│   ├── Silver/
+│   │   ├── ddl_silver.sql
+│   │   └── proc_load_silver.sql
+│   └── Gold/
+│       ├── ddl_gold.sql
+│       └── analytics_gold.sql
+└── Docs/
+
+
+
+
+
