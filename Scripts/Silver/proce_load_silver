@@ -1,0 +1,231 @@
+/*==============================================================================
+Stored Procedure: silver.load_silver
+Database:         Datawarehouse
+Schema:           silver
+Purpose:          Transforms, cleans, casts, and loads CRM and ERP datasets from
+                  the Bronze layer into the Silver layer.
+Usage:            EXEC silver.load_silver;
+==============================================================================*/
+
+USE Datawarehouse;
+GO
+
+CREATE OR ALTER PROCEDURE silver.load_silver
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @batch_start_time DATETIME2 = GETDATE(),
+            @batch_end_time   DATETIME2;
+    DECLARE @start_time       DATETIME2,
+            @end_time         DATETIME2;
+
+    BEGIN TRY
+        PRINT '==================================================';
+        PRINT 'Loading Silver Layer';
+        PRINT '==================================================';
+
+        ----------------------------------------------------
+        -- 1. Loading silver.crm_customers
+        ----------------------------------------------------
+        SET @start_time = GETDATE();
+        PRINT '>> Truncating Table: silver.crm_customers';
+        TRUNCATE TABLE silver.crm_customers;
+
+        PRINT '>> Inserting Data Into: silver.crm_customers';
+        INSERT INTO silver.crm_customers (
+            customer_id,
+            first_name,
+            last_name,
+            email,
+            signup_date
+        )
+        SELECT
+            customer_id,
+            first_name,
+            last_name,
+            email,
+            signup_date
+        FROM (
+            SELECT
+                TRY_CAST(TRY_CAST(LTRIM(RTRIM(customer_id)) AS DECIMAL(18, 2)) AS INT) AS customer_id,
+                LTRIM(RTRIM(first_name))                                                AS first_name,
+                LOWER(LTRIM(RTRIM(last_name)))                                          AS last_name,
+                LOWER(LTRIM(RTRIM(email)))                                              AS email,
+                TRY_CONVERT(DATETIME2, LTRIM(RTRIM(signup_date)))                       AS signup_date,
+                ROW_NUMBER() OVER (
+                    PARTITION BY TRY_CAST(TRY_CAST(LTRIM(RTRIM(customer_id)) AS DECIMAL(18, 2)) AS INT)
+                    ORDER BY TRY_CONVERT(DATETIME2, LTRIM(RTRIM(signup_date))) DESC
+                ) AS flag_last
+            FROM bronze.crm_customers
+            WHERE TRY_CAST(TRY_CAST(LTRIM(RTRIM(customer_id)) AS DECIMAL(18, 2)) AS INT) IS NOT NULL
+        ) t
+        WHERE flag_last = 1;
+
+        SET @end_time = GETDATE();
+        PRINT '>> Load Duration: ' + CAST(DATEDIFF(SECOND, @start_time, @end_time) AS NVARCHAR(20)) + ' seconds';
+        PRINT '>> ----------------------------------------------';
+
+        ----------------------------------------------------
+        -- 2. Loading silver.crm_interactions
+        ----------------------------------------------------
+        SET @start_time = GETDATE();
+        PRINT '>> Truncating Table: silver.crm_interactions';
+        TRUNCATE TABLE silver.crm_interactions;
+
+        PRINT '>> Inserting Data Into: silver.crm_interactions';
+        INSERT INTO silver.crm_interactions (
+            interaction_id,
+            customer_id,
+            channel,
+            status
+        )
+        SELECT
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(interaction_id)) AS DECIMAL(18, 2)) AS INT) AS interaction_id,
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(customer_id)) AS DECIMAL(18, 2)) AS INT)    AS customer_id,
+            LOWER(LTRIM(RTRIM(channel)))                                              AS channel,
+            COALESCE(NULLIF(LTRIM(RTRIM(status)), ''), 'unknown')                     AS status
+        FROM bronze.crm_interactions;
+
+        SET @end_time = GETDATE();
+        PRINT '>> Load Duration: ' + CAST(DATEDIFF(SECOND, @start_time, @end_time) AS NVARCHAR(20)) + ' seconds';
+        PRINT '>> ----------------------------------------------';
+
+        ----------------------------------------------------
+        -- 3. Loading silver.crm_support_tickets
+        ----------------------------------------------------
+        SET @start_time = GETDATE();
+        PRINT '>> Truncating Table: silver.crm_support_tickets';
+        TRUNCATE TABLE silver.crm_support_tickets;
+
+        PRINT '>> Inserting Data Into: silver.crm_support_tickets';
+        INSERT INTO silver.crm_support_tickets (
+            tickets_id,
+            customer_id,
+            issue_category,
+            priority
+        )
+        SELECT
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(tickets_id)) AS DECIMAL(18, 2)) AS INT)  AS tickets_id,
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(customer_id)) AS DECIMAL(18, 2)) AS INT) AS customer_id,
+            COALESCE(NULLIF(LTRIM(RTRIM(issue_category)), ''), 'Uncategorized')      AS issue_category,
+            LOWER(LTRIM(RTRIM(priority)))                                             AS priority
+        FROM bronze.crm_support_tickets;
+
+        SET @end_time = GETDATE();
+        PRINT '>> Load Duration: ' + CAST(DATEDIFF(SECOND, @start_time, @end_time) AS NVARCHAR(20)) + ' seconds';
+        PRINT '>> ----------------------------------------------';
+
+        PRINT '--------------------------------------------------';
+        PRINT 'Loading ERP Tables';
+        PRINT '--------------------------------------------------';
+
+        ----------------------------------------------------
+        -- 4. Loading silver.erp_orders
+        ----------------------------------------------------
+        SET @start_time = GETDATE();
+        PRINT '>> Truncating Table: silver.erp_orders';
+        TRUNCATE TABLE silver.erp_orders;
+
+        PRINT '>> Inserting Data Into: silver.erp_orders';
+        INSERT INTO silver.erp_orders (
+            order_id,
+            customer_id,
+            order_date,
+            order_status
+        )
+        SELECT
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(order_id)) AS DECIMAL(18, 2)) AS INT)    AS order_id,
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(customer_id)) AS DECIMAL(18, 2)) AS INT) AS customer_id,
+            TRY_CONVERT(DATETIME2, LTRIM(RTRIM(order_date)))                        AS order_date,
+            CASE
+                WHEN UPPER(LTRIM(RTRIM(order_status))) = 'COMPLETED'  THEN 'Completed'
+                WHEN UPPER(LTRIM(RTRIM(order_status))) = 'CANCELLED'  THEN 'Cancelled'
+                WHEN UPPER(LTRIM(RTRIM(order_status))) = 'CANCELED'   THEN 'Canceled'
+                WHEN UPPER(LTRIM(RTRIM(order_status))) = 'PENDING'    THEN 'Pending'
+                WHEN UPPER(LTRIM(RTRIM(order_status))) = 'SHIPPED'    THEN 'Shipped'
+                WHEN UPPER(LTRIM(RTRIM(order_status))) = 'PROCESSING' THEN 'Processing'
+                ELSE COALESCE(NULLIF(LTRIM(RTRIM(order_status)), ''), 'Unknown')
+            END AS order_status
+        FROM bronze.erp_orders
+        WHERE TRY_CAST(TRY_CAST(LTRIM(RTRIM(customer_id)) AS DECIMAL(18, 2)) AS INT) IS NOT NULL;
+
+        SET @end_time = GETDATE();
+        PRINT '>> Load Duration: ' + CAST(DATEDIFF(SECOND, @start_time, @end_time) AS NVARCHAR(20)) + ' seconds';
+        PRINT '>> ----------------------------------------------';
+
+        ----------------------------------------------------
+        -- 5. Loading silver.erp_order_items
+        ----------------------------------------------------
+        SET @start_time = GETDATE();
+        PRINT '>> Truncating Table: silver.erp_order_items';
+        TRUNCATE TABLE silver.erp_order_items;
+
+        PRINT '>> Inserting Data Into: silver.erp_order_items';
+        INSERT INTO silver.erp_order_items (
+            order_item_id,
+            order_id,
+            product_id,
+            quantity
+        )
+        SELECT
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(order_item_id)) AS DECIMAL(18, 2)) AS INT) AS order_item_id,
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(order_id)) AS DECIMAL(18, 2)) AS INT)      AS order_id,
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(product_id)) AS DECIMAL(18, 2)) AS INT)    AS product_id,
+            CASE
+                WHEN TRY_CAST(TRY_CAST(LTRIM(RTRIM(quantity)) AS DECIMAL(18, 2)) AS INT) IS NULL
+                  OR TRY_CAST(TRY_CAST(LTRIM(RTRIM(quantity)) AS DECIMAL(18, 2)) AS INT) <= 0 THEN 1
+                ELSE TRY_CAST(TRY_CAST(LTRIM(RTRIM(quantity)) AS DECIMAL(18, 2)) AS INT)
+            END AS quantity
+        FROM bronze.erp_order_items;
+
+        SET @end_time = GETDATE();
+        PRINT '>> Load Duration: ' + CAST(DATEDIFF(SECOND, @start_time, @end_time) AS NVARCHAR(20)) + ' seconds';
+        PRINT '>> ----------------------------------------------';
+
+        ----------------------------------------------------
+        -- 6. Loading silver.erp_products
+        ----------------------------------------------------
+        SET @start_time = GETDATE();
+        PRINT '>> Truncating Table: silver.erp_products';
+        TRUNCATE TABLE silver.erp_products;
+
+        PRINT '>> Inserting Data Into: silver.erp_products';
+        INSERT INTO silver.erp_products (
+            product_id,
+            product_name,
+            category,
+            price
+        )
+        SELECT
+            TRY_CAST(TRY_CAST(LTRIM(RTRIM(product_id)) AS DECIMAL(18, 2)) AS INT) AS product_id,
+            COALESCE(NULLIF(LTRIM(RTRIM(product_name)), ''), 'Unnamed Product')     AS product_name,
+            LOWER(LTRIM(RTRIM(category)))                                           AS category,
+            CASE
+                WHEN TRY_CAST(LTRIM(RTRIM(price)) AS DECIMAL(18, 2)) IS NULL
+                  OR TRY_CAST(LTRIM(RTRIM(price)) AS DECIMAL(18, 2)) <= 0 THEN CAST(0.00 AS DECIMAL(18, 2))
+                ELSE TRY_CAST(LTRIM(RTRIM(price)) AS DECIMAL(18, 2))
+            END AS price
+        FROM bronze.erp_products;
+
+        SET @end_time = GETDATE();
+        PRINT '>> Load Duration: ' + CAST(DATEDIFF(SECOND, @start_time, @end_time) AS NVARCHAR(20)) + ' seconds';
+        PRINT '>> ----------------------------------------------';
+
+        SET @batch_end_time = GETDATE();
+        PRINT '==================================================';
+        PRINT 'Loading Silver Layer is Completed Successfully';
+        PRINT '   - Total Load Duration: ' + CAST(DATEDIFF(SECOND, @batch_start_time, @batch_end_time) AS NVARCHAR(20)) + ' seconds';
+        PRINT '==================================================';
+    END TRY
+    BEGIN CATCH
+        PRINT '==================================================';
+        PRINT 'ERROR OCCURRED DURING LOADING SILVER LAYER';
+        PRINT 'Error Message: ' + ERROR_MESSAGE();
+        PRINT 'Error Number:  ' + CAST(ERROR_NUMBER() AS NVARCHAR(20));
+        PRINT 'Error State:   ' + CAST(ERROR_STATE() AS NVARCHAR(20));
+        PRINT 'Error Line:    ' + CAST(ERROR_LINE() AS NVARCHAR(20));
+        PRINT '==================================================';
+    END CATCH
+END;
+GO
