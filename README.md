@@ -15,14 +15,14 @@ An end-to-end **Medallion Architecture** (`bronze`, `silver`, `gold`) data wareh
                                     |
                                     v
 +-----------------------------------------------------------------------+
-|                       BRONZE LAYER (bronze.*)                         |
+|                       BRONZE LAYER (bronze.)                         |
 |  - Fast, resilient staging layer using NVARCHAR(50) to prevent bulk-  |
 |    load type, decimal, and date conversion errors                     |
 +-----------------------------------+-----------------------------------+
                                     |
                                     v  silver.load_silver
 +-----------------------------------------------------------------------+
-|                       SILVER LAYER (silver.*)                         |
+|                       SILVER LAYER (silver.)                         |
 |  - Trimmed, standardized strings, statuses, and categories            |
 |  - Decimal-to-INT & DATETIME2 casting (TRY_CAST / TRY_CONVERT)        |
 |  - Customer deduplication via ROW_NUMBER()                            |
@@ -31,9 +31,9 @@ An end-to-end **Medallion Architecture** (`bronze`, `silver`, `gold`) data wareh
                                     |
                                     v  ddl_gold.sql
 +-----------------------------------------------------------------------+
-|                        GOLD LAYER (gold.*)                            |
+|                        GOLD LAYER (gold.)                            |
 |  - Star-schema analytical views ready for BI & reporting:             |
-|    * Dimensions: gold.dim_customers, gold.dim_products                |
-|    * Facts:      gold.fact_sales, gold.fact_interactions,             |
+|     Dimensions: gold.dim_customers, gold.dim_products                |
+|     Facts:      gold.fact_sales, gold.fact_interactions,             |
 |                  gold.fact_support_tickets                            |
 +-----------------------------------------------------------------------+
