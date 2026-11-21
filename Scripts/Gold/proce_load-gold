@@ -1,1 +1,163 @@
+/*==============================================================================
+Stored Procedure: gold.load_gold
+Database:         Datawarehouse
+Schema:           gold
+Purpose:          Loads the Gold dimension tables from Silver without ever
+                  truncating them, so surrogate keys stay stable:
+                    - existing business ids   -> attributes are updated in place
+                    - new business ids        -> inserted, receiving the next key
+                  Fact views need no loading; they read the dimensions directly.
+Usage:            EXEC gold.load_gold;
+==============================================================================*/
 
+USE Datawarehouse;
+GO
+
+CREATE OR ALTER PROCEDURE gold.load_gold
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @batch_start_time DATETIME2 = SYSDATETIME();
+    DECLARE @rows INT;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        PRINT '==================================================';
+        PRINT 'Loading Gold Layer';
+        PRINT '==================================================';
+
+        ----------------------------------------------------
+        -- 1. gold.dim_customers
+        ----------------------------------------------------
+        SELECT
+            customer_id,
+            first_name,
+            last_name,
+            LTRIM(RTRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, '')))) AS full_name,
+            email,
+            CAST(signup_date AS DATE) AS signup_date,
+            YEAR(signup_date)         AS signup_year,
+            MONTH(signup_date)        AS signup_month
+        INTO #src_customers
+        FROM silver.crm_customers
+        WHERE customer_id IS NOT NULL;
+
+        -- Update customers whose attributes changed (EXCEPT treats NULLs as equal)
+        UPDATE d
+        SET d.first_name      = s.first_name,
+            d.last_name       = s.last_name,
+            d.full_name       = s.full_name,
+            d.email           = s.email,
+            d.signup_date     = s.signup_date,
+            d.signup_year     = s.signup_year,
+            d.signup_month    = s.signup_month,
+            d.dwh_update_date = SYSDATETIME()
+        FROM gold.dim_customers d
+        JOIN #src_customers s
+            ON d.customer_id = s.customer_id
+        WHERE d.customer_key <> -1
+          AND EXISTS (
+                SELECT s.first_name, s.last_name, s.full_name, s.email,
+                       s.signup_date, s.signup_year, s.signup_month
+                EXCEPT
+                SELECT d.first_name, d.last_name, d.full_name, d.email,
+                       d.signup_date, d.signup_year, d.signup_month
+          );
+        SET @rows = @@ROWCOUNT;
+        PRINT '>> gold.dim_customers rows updated:  ' + CAST(@rows AS NVARCHAR(20));
+
+        -- Insert customers that are new
+        INSERT INTO gold.dim_customers (
+            customer_id, first_name, last_name, full_name, email,
+            signup_date, signup_year, signup_month
+        )
+        SELECT
+            s.customer_id, s.first_name, s.last_name, s.full_name, s.email,
+            s.signup_date, s.signup_year, s.signup_month
+        FROM #src_customers s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM gold.dim_customers d WHERE d.customer_id = s.customer_id
+        )
+        ORDER BY s.customer_id;
+        SET @rows = @@ROWCOUNT;
+        PRINT '>> gold.dim_customers rows inserted: ' + CAST(@rows AS NVARCHAR(20));
+
+        ----------------------------------------------------
+        -- 2. gold.dim_products
+        ----------------------------------------------------
+        -- ROW_NUMBER guards against duplicate product ids in silver so the
+        -- UNIQUE constraint cannot fail the load. Duplicates are reported by
+        -- quality_checks.sql and should be fixed in silver.
+        SELECT
+            product_id,
+            product_name,
+            COALESCE(NULLIF(category, ''), 'uncategorized') AS product_category,
+            price AS unit_price,
+            is_price_valid
+        INTO #src_products
+        FROM (
+            SELECT
+                p.*,
+                ROW_NUMBER() OVER (PARTITION BY p.product_id ORDER BY (SELECT NULL)) AS rn
+            FROM silver.erp_products p
+            WHERE p.product_id IS NOT NULL
+        ) t
+        WHERE rn = 1;
+
+        UPDATE d
+        SET d.product_name     = s.product_name,
+            d.product_category = s.product_category,
+            d.unit_price       = s.unit_price,
+            d.is_price_valid   = s.is_price_valid,
+            d.dwh_update_date  = SYSDATETIME()
+        FROM gold.dim_products d
+        JOIN #src_products s
+            ON d.product_id = s.product_id
+        WHERE d.product_key <> -1
+          AND EXISTS (
+                SELECT s.product_name, s.product_category, s.unit_price, s.is_price_valid
+                EXCEPT
+                SELECT d.product_name, d.product_category, d.unit_price, d.is_price_valid
+          );
+        SET @rows = @@ROWCOUNT;
+        PRINT '>> gold.dim_products rows updated:   ' + CAST(@rows AS NVARCHAR(20));
+
+        INSERT INTO gold.dim_products (
+            product_id, product_name, product_category, unit_price, is_price_valid
+        )
+        SELECT
+            s.product_id, s.product_name, s.product_category, s.unit_price, s.is_price_valid
+        FROM #src_products s
+        WHERE NOT EXISTS (
+            SELECT 1 FROM gold.dim_products d WHERE d.product_id = s.product_id
+        )
+        ORDER BY s.product_id;
+        SET @rows = @@ROWCOUNT;
+        PRINT '>> gold.dim_products rows inserted:  ' + CAST(@rows AS NVARCHAR(20));
+
+        COMMIT TRANSACTION;
+
+        PRINT '==================================================';
+        PRINT 'Loading Gold Layer is Completed Successfully';
+        PRINT '   - Total Load Duration: '
+              + CAST(DATEDIFF(SECOND, @batch_start_time, SYSDATETIME()) AS NVARCHAR(20)) + ' seconds';
+        PRINT '==================================================';
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        PRINT '==================================================';
+        PRINT 'ERROR OCCURRED DURING LOADING GOLD LAYER';
+        PRINT 'Error Message: ' + ERROR_MESSAGE();
+        PRINT 'Error Number:  ' + CAST(ERROR_NUMBER() AS NVARCHAR(20));
+        PRINT 'Error State:   ' + CAST(ERROR_STATE() AS NVARCHAR(20));
+        PRINT 'Error Line:    ' + CAST(ERROR_LINE() AS NVARCHAR(20));
+        PRINT '==================================================';
+
+        THROW;  -- re-raise so the caller sees the failure
+    END CATCH
+END;
+GO
