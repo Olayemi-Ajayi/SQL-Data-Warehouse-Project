@@ -1,15 +1,26 @@
 /*==============================================================================
 DDL Script: Create Silver Layer Tables
-Database: Datawarehouse
-Schema:   silver
-Purpose:  Creates clean, typed Silver tables for CRM and ERP datasets with
-          standard audit metadata (dwh_create_date).
+Database:   Datawarehouse
+Schema:     silver
+Purpose:    Creates clean, typed Silver tables for CRM and ERP datasets with
+            standard audit metadata (dwh_create_date).
+Warning:    Running this script drops and recreates all silver tables.
+            Re-run EXEC silver.load_silver; afterwards to reload the data.
 ==============================================================================*/
 
 USE Datawarehouse;
 GO
 
+-- Ensure silver schema exists
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'silver')
+BEGIN
+    EXEC('CREATE SCHEMA silver');
+END;
+GO
+
+--------------------------------------------------------------------------------
 -- 1. silver.crm_customers
+--------------------------------------------------------------------------------
 IF OBJECT_ID('silver.crm_customers', 'U') IS NOT NULL
     DROP TABLE silver.crm_customers;
 GO
@@ -20,11 +31,13 @@ CREATE TABLE silver.crm_customers (
     last_name       NVARCHAR(100),
     email           NVARCHAR(255),
     signup_date     DATETIME2,
-    dwh_create_date DATETIME2 DEFAULT GETDATE()
+    dwh_create_date DATETIME2 DEFAULT SYSDATETIME()
 );
 GO
 
+--------------------------------------------------------------------------------
 -- 2. silver.crm_interactions
+--------------------------------------------------------------------------------
 IF OBJECT_ID('silver.crm_interactions', 'U') IS NOT NULL
     DROP TABLE silver.crm_interactions;
 GO
@@ -34,11 +47,13 @@ CREATE TABLE silver.crm_interactions (
     customer_id     INT,
     channel         NVARCHAR(50),
     status          NVARCHAR(50),
-    dwh_create_date DATETIME2 DEFAULT GETDATE()
+    dwh_create_date DATETIME2 DEFAULT SYSDATETIME()
 );
 GO
 
+--------------------------------------------------------------------------------
 -- 3. silver.crm_support_tickets
+--------------------------------------------------------------------------------
 IF OBJECT_ID('silver.crm_support_tickets', 'U') IS NOT NULL
     DROP TABLE silver.crm_support_tickets;
 GO
@@ -48,11 +63,13 @@ CREATE TABLE silver.crm_support_tickets (
     customer_id     INT,
     issue_category  NVARCHAR(100),
     priority        NVARCHAR(50),
-    dwh_create_date DATETIME2 DEFAULT GETDATE()
+    dwh_create_date DATETIME2 DEFAULT SYSDATETIME()
 );
 GO
 
+--------------------------------------------------------------------------------
 -- 4. silver.erp_orders
+--------------------------------------------------------------------------------
 IF OBJECT_ID('silver.erp_orders', 'U') IS NOT NULL
     DROP TABLE silver.erp_orders;
 GO
@@ -62,11 +79,13 @@ CREATE TABLE silver.erp_orders (
     customer_id     INT,
     order_date      DATETIME2,
     order_status    NVARCHAR(50),
-    dwh_create_date DATETIME2 DEFAULT GETDATE()
+    dwh_create_date DATETIME2 DEFAULT SYSDATETIME()
 );
 GO
 
+--------------------------------------------------------------------------------
 -- 5. silver.erp_order_items
+--------------------------------------------------------------------------------
 IF OBJECT_ID('silver.erp_order_items', 'U') IS NOT NULL
     DROP TABLE silver.erp_order_items;
 GO
@@ -76,11 +95,13 @@ CREATE TABLE silver.erp_order_items (
     order_id        INT,
     product_id      INT,
     quantity        INT,
-    dwh_create_date DATETIME2 DEFAULT GETDATE()
+    dwh_create_date DATETIME2 DEFAULT SYSDATETIME()
 );
 GO
 
+--------------------------------------------------------------------------------
 -- 6. silver.erp_products
+--------------------------------------------------------------------------------
 IF OBJECT_ID('silver.erp_products', 'U') IS NOT NULL
     DROP TABLE silver.erp_products;
 GO
@@ -89,7 +110,8 @@ CREATE TABLE silver.erp_products (
     product_id      INT,
     product_name    NVARCHAR(150),
     category        NVARCHAR(100),
-    price           DECIMAL(18, 2),
-    dwh_create_date DATETIME2 DEFAULT GETDATE()
+    price           DECIMAL(18, 2),   -- NULL when the source price is missing or non-positive
+    is_price_valid  BIT,              -- 1 = usable price, 0 = missing or non-positive
+    dwh_create_date DATETIME2 DEFAULT SYSDATETIME()
 );
 GO
