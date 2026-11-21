@@ -11,8 +11,7 @@ Script Purpose:
 
 Run order:
     1. ddl_silver.sql, then EXEC silver.load_silver;
-    2. ddl_gold.sql,   then EXEC gold.load_gold;
-    3. This script.
+    2. This script.
 
 Usage Notes:
     - Checks marked "expect 0" should return 0. Investigate any other value.
